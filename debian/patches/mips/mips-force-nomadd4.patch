@@ -1,0 +1,66 @@
+The MIPS port aims to support the Loongson 3 family of CPUs in addition
+of the other MIPS CPUs. On the Loongson 3 family the MADD4 instructions
+are fused, while they are not fused on the other MIPS CPUs. In order to
+support both, we have to disabled those instructions.
+
+For that, the patch below basically corresponds to the --with-madd4=no
+used on the GCC side.
+
+Index: llvm-toolchain-snapshot_12~++20201031095131+aab71d44431/clang/lib/Basic/Targets/Mips.h
+===================================================================
+--- llvm-toolchain-snapshot_12~++20201031095131+aab71d44431.orig/clang/lib/Basic/Targets/Mips.h
++++ llvm-toolchain-snapshot_12~++20201031095131+aab71d44431/clang/lib/Basic/Targets/Mips.h
+@@ -332,6 +332,8 @@ public:
+         HasMSA = true;
+       else if (Feature == "+nomadd4")
+         DisableMadd4 = true;
++      else if (Feature == "-nomadd4")
++        DisableMadd4 = false;
+       else if (Feature == "+fp64")
+         FPMode = FP64;
+       else if (Feature == "-fp64")
+Index: llvm-toolchain-snapshot_12~++20201031095131+aab71d44431/llvm/lib/Target/Mips/MipsSubtarget.cpp
+===================================================================
+--- llvm-toolchain-snapshot_12~++20201031095131+aab71d44431.orig/llvm/lib/Target/Mips/MipsSubtarget.cpp
++++ llvm-toolchain-snapshot_12~++20201031095131+aab71d44431/llvm/lib/Target/Mips/MipsSubtarget.cpp
+@@ -80,7 +80,7 @@ MipsSubtarget::MipsSubtarget(const Tripl
+       InMips16HardFloat(Mips16HardFloat), InMicroMipsMode(false), HasDSP(false),
+       HasDSPR2(false), HasDSPR3(false), AllowMixed16_32(Mixed16_32 | Mips_Os16),
+       Os16(Mips_Os16), HasMSA(false), UseTCCInDIV(false), HasSym32(false),
+-      HasEVA(false), DisableMadd4(false), HasMT(false), HasCRC(false),
++      HasEVA(false), DisableMadd4(true), HasMT(false), HasCRC(false),
+       HasVirt(false), HasGINV(false), UseIndirectJumpsHazard(false),
+       StackAlignOverride(StackAlignOverride), TM(TM), TargetTriple(TT),
+       TSInfo(), InstrInfo(MipsInstrInfo::create(
+@@ -91,6 +91,9 @@ MipsSubtarget::MipsSubtarget(const Tripl
+   if (MipsArchVersion == MipsDefault)
+     MipsArchVersion = Mips32;
+ 
++  if (hasMips32r6() || hasMips64r6())
++    DisableMadd4 = false;
++
+   // Don't even attempt to generate code for MIPS-I and MIPS-V. They have not
+   // been tested and currently exist for the integrated assembler only.
+   if (MipsArchVersion == Mips1)
+@@ -238,6 +241,7 @@ MipsSubtarget &
+ MipsSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS,
+                                                const TargetMachine &TM) {
+   StringRef CPUName = MIPS_MC::selectMipsCPU(TM.getTargetTriple(), CPU);
++  SubtargetFeatures Features(FS);
+ 
+   // Parse features string.
+   ParseSubtargetFeatures(CPUName, /*TuneCPU*/ CPUName, FS);
+@@ -260,6 +264,13 @@ MipsSubtarget::initializeSubtargetDepend
+     report_fatal_error("64-bit code requested on a subtarget that doesn't "
+                        "support it!");
+ 
++  for (const std::string &Feature : Features.getFeatures()) {
++    if (Feature == "+nomadd4")
++      DisableMadd4 = true;
++    else if (Feature == "-nomadd4")
++      DisableMadd4 = false;
++  }
++
+   return *this;
+ }
+ 
